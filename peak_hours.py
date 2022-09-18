@@ -1,18 +1,24 @@
 #!/usr/bin/python3
-from tkinter import Label
 import urllib.request
 import json
 import argparse
 import configparser
 import time
+from datetime import datetime, timedelta
+from datetime import time as dtime
 
 class Config:
     loaded : bool = False
     command : str = ""
     file_path : str = ""
+    log_file_path : str = "cozytouch_peak_hours.log"
     login : str = ""
     password : str = ""
     device_url : str = ""
+    absence_ranges = []
+    absence_start_margin = 0
+    absence_end_margin = 0
+    absence_prog_margin = 0
     atlantic_url=u'https://api.groupe-atlantic.com/'
     cozytouch_url=u'https://ha110-1.overkiz.com/enduser-mobile-web/externalAPI/json/'
     cozytouch_login_url=u'https://ha110-1.overkiz.com/enduser-mobile-web/enduserAPI/'
@@ -26,6 +32,20 @@ class Session:
 
 config = Config()
 session = Session()
+
+def Log(message : str):
+    PrintAndLog(message, False)
+
+def PrintAndLog(message : str, doPrint = True):
+    message_str = str(message)
+    line = str(datetime.now()) + " - " + message_str
+    if(doPrint):
+        print(line)
+    log_file = open(config.log_file_path, 'a')
+    log_file.write(line)
+    log_file.write("\n")
+    log_file.close()
+
 
 def ParseArguments():
     parser = argparse.ArgumentParser(description='Water heater control to avoid peak hours.')
@@ -43,17 +63,21 @@ def LoadConfig():
     config_file.read(config.file_path)
 
     if len(config_file.sections()) == 0:
-        print("Fail to open or read config file '"+config.file_path+"'")
+        PrintAndLog("Fail to open or read config file '"+config.file_path+"'")
         return False
 
     if 'Access' not in config_file:
-        print("Fail to find 'Access section in config file")
+        PrintAndLog("Fail to find 'Access section in config file")
         return False
 
     config.login = config_file['Access']['Login']
     config.password = config_file['Access']['Password']
 
     config.device_url = config_file['Device']['Url']
+    config.absence_ranges = json.loads(config_file['Device']['AbsenceRanges'])
+    config.absence_start_margin = int(config_file['Device']['AbsenceStartMargin'])
+    config.absence_end_margin = int(config_file['Device']['AbsenceEndMargin'])
+    config.absence_prog_margin = int(config_file['Device']['AbsenceProgMargin'])
 
     config.loaded = True
     return True
@@ -72,14 +96,15 @@ def GetAtlanticToken():
     try:
         raw_response = urllib.request.urlopen(req, data)
     except urllib.error.HTTPError as err:
-        print("Fail to connect to server")
-        print('error' + str(err))
-        print(err.read().decode())
+        PrintAndLog("Fail to connect to server")
+        PrintAndLog('error' + str(err))
+        PrintAndLog(err.read().decode())
         return
 
-    print("Get Atlantic token: OK")
+    PrintAndLog("Get Atlantic token: OK")
 
     response = json.loads(raw_response.read().decode(raw_response.info().get_param('charset') or 'utf-8'))
+    Log(response)
     session.atlantic_access_token = response['access_token']
     session.atlantic_refresh_token = response['refresh_token']
     session.atlantic_token_expire_in = response['expires_in']
@@ -94,12 +119,13 @@ def CozyTouchLogin():
     try:
         jst_raw_response = urllib.request.urlopen(reqjwt)
     except urllib.error.HTTPError as err:
-        print("Fail to get jwt")
-        print('error' + str(err))
-        print(err.read().decode())
+        PrintAndLog("Fail to get jwt")
+        PrintAndLog('error' + str(err))
+        priPrintAndLognt(err.read().decode())
         return
     jwt = jst_raw_response.read().decode(jst_raw_response.info().get_param('charset') or 'utf-8').replace('"', '')
-    print("Get jst token: OK")
+    PrintAndLog("Get jst token: OK")
+    Log(jwt)
 
     # Cozytouch login
     url = config.cozytouch_login_url + "login"
@@ -112,16 +138,16 @@ def CozyTouchLogin():
     try:
         raw_response = urllib.request.urlopen(req, data)
     except urllib.error.HTTPError as err:
-        print("Fail to connect to cosytouch login server")
-        print('error' + str(err))
-        print(err.read().decode())
+        PrintAndLog("Fail to connect to cosytouch login server")
+        PrintAndLog('error' + str(err))
+        PrintAndLog(err.read().decode())
         return
 
-    #response = raw_response.read().decode(raw_response.info().get_param('charset') or 'utf-8')
-    #print(response)
+    response = raw_response.read().decode(raw_response.info().get_param('charset') or 'utf-8')
+    Log(response)
     session.cozytouch_cookies = raw_response.info().get_all('Set-Cookie')[0]
 
-    print("Cosytouch login: OK")
+    PrintAndLog("Cosytouch login: OK")
 
 def CozyTouchGet(url):
     url = config.cozytouch_url + url
@@ -133,20 +159,20 @@ def CozyTouchGet(url):
     try:
         raw_response = urllib.request.urlopen(req)
     except urllib.error.HTTPError as err:
-        print("Fail to connect to cosytouch data server")
-        print('error' + str(err))
-        print(err.read().decode())
+        PrintAndLog("Fail to connect to cosytouch data server")
+        PrintAndLog('error' + str(err))
+        PrintAndLog(err.read().decode())
         return
     
     response_json = (raw_response.read().decode(raw_response.info().get_param('charset') or 'utf-8'))
     response = json.loads(response_json)
     
-    #print(response_json)
+    Log(response_json)
     time.sleep(1) # Wait between requests
     return response
 
 def CozyTouchCommand(command, parameters):
-
+    PrintAndLog("Send command '"+ command + ' ' + str(parameters))
     url = config.cozytouch_url + '../../enduserAPI/exec/apply'
     req = urllib.request.Request(url, method='POST')
     req.add_header('cache-control', 'no-cache')
@@ -173,12 +199,12 @@ def CozyTouchCommand(command, parameters):
     try:
         raw_response = urllib.request.urlopen(req, jsondataasbytes)
     except urllib.error.HTTPError as err:
-        print("Fail to send command")
-        print('error' + str(err))
-        print(err.read().decode())
+        PrintAndLog("Fail to send command")
+        PrintAndLog('error' + str(err))
+        PrintAndLog(err.read().decode())
         return
     response = json.loads(raw_response.read().decode(raw_response.info().get_param('charset') or 'utf-8'))
-    print(response)
+    Log(response)
     time.sleep(1) # Wait between requests
     return response
 
@@ -190,59 +216,131 @@ def Scan():
     setup = CozyTouchGet('getSetup')
     gateway = setup['setup']['gateways'][0]
     if gateway['alive']:
-        print("Gateway: OK")
+        PrintAndLog("Gateway: OK")
     else:
-        print("Gateway not alive")
+        PrintAndLog("Gateway not alive")
 
-    print("Devices:")
+    PrintAndLog("Devices:")
     for device in setup['setup']['devices']:
         label = device['label']
         widget = device['widget']
         deviceURL = device['deviceURL']
-        print("  - "+ label + ": "+ widget)
-        print("    - deviceURL: "+ deviceURL)
+        PrintAndLog("  - "+ label + ": "+ widget)
+        PrintAndLog("    - deviceURL: "+ deviceURL)
 
 def PrintDeviceStatus():
     devices = CozyTouchGet('../../enduserAPI/setup/devices')
     for device in devices:
         if device['deviceURL'] != config.device_url:
             continue
-        print(device['label'])
+        PrintAndLog(device['label'])
         states = device['states']
         for state in states:
             if state['name'] == "modbuslink:DHWAbsenceModeState":
-                print('  - AbsenceModeState: '+ state['value'])
-            if state['name'] == "modbuslink:MiddleWaterTemperatureState":
-                print('  - Temperature: '+ str(state['value']))
-            if state['name'] == "core:ExpectedNumberOfShowerState":
-                print('  - ExpectedNumberOfShower: '+ str(state['value']))
-            if state['name'] == "core:DateTimeState":
-                print('  - Date: '+ str(state['value']))
-            if "Absence" in state['name']:
-                print('  - '+ state['name']+': '+ str(state['value']))
-            if "Temperature" in state['name']:
-                print('  - '+ state['name']+': '+ str(state['value']))
-            if "Heating" in state['name']:
-                print('  - '+ state['name']+': '+ str(state['value']))
-                
+                PrintAndLog('  * AbsenceModeState: '+ state['value'])
+            elif state['name'] == "modbuslink:MiddleWaterTemperatureState":
+                PrintAndLog('  * Temperature: '+ str(state['value']))
+            elif state['name'] == "core:ExpectedNumberOfShowerState":
+                PrintAndLog('  * ExpectedNumberOfShower: '+ str(state['value']))
+            elif state['name'] == "core:DateTimeState":
+                PrintAndLog('  * Date: '+ str(state['value']))
+            elif state['name'] == "core:ControlWaterTargetTemperatureState":
+                PrintAndLog('  * Target temperature: '+ str(state['value']))
+            elif state['name'] == "core:HeatingStatusState":
+                PrintAndLog('  * Heating: '+ str(state['value']))
+            elif state['name'] == "core:AbsenceEndDateState":
+                PrintAndLog('  * AbsenceEndDate: '+ str(state['value']))
+            elif state['name'] == "core:AbsenceStartDateState":
+                PrintAndLog('  * AbsenceStartDate: '+ str(state['value']))
+            elif state['name'] == "modbuslink:MiddleWaterTemperatureState":
+                PrintAndLog('  * Temperature 1: '+ str(state['value']))
+            elif state['name'] == "core:MiddleWaterTemperatureInState":
+                PrintAndLog('  * Temperature 2: '+ str(state['value']))
+            #elif "Absence" in state['name']:
+            #    PrintAndLog('  - '+ state['name']+': '+ str(state['value']))
+            #elif "Temperature" in state['name']:
+            #    PrintAndLog('  - '+ state['name']+': '+ str(state['value']))
+            #elif "Heating" in state['name']:
+            #    PrintAndLog('  - '+ state['name']+': '+ str(state['value']))
 
-def Run():
+
+class AbsenceRange:
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+    
+    def str(self):
+        return "(" + str(self.start) + ", " + str(self.end) + ")"
+
+def GetNextAbsenceRange(current_datetime):
+    current_time = current_datetime.time()
+    next_absence_start_datetime = None
+    next_absence_end_datetime = None
+
+    for absence_range in config.absence_ranges:
+        start_time = dtime.fromisoformat(absence_range[0])
+        
+        absence_start_datetime = None
+
+        if start_time >= current_time:
+            # absence start the same day
+            absence_start_datetime = datetime.combine(current_datetime.date(), start_time)
+        else:
+            absence_start_datetime = datetime.combine(current_datetime.date() + timedelta(days=1), start_time)
+
+        if not next_absence_start_datetime or absence_start_datetime < next_absence_start_datetime:
+            next_absence_start_datetime = absence_start_datetime
+
+            end_time = dtime.fromisoformat(absence_range[1])
+            if end_time >= start_time:
+                # absence end same day
+                next_absence_end_datetime = datetime.combine(next_absence_start_datetime.date(), end_time)
+            else:
+                next_absence_end_datetime = datetime.combine(next_absence_start_datetime.date() + timedelta(days=1), end_time)
+
+    return AbsenceRange(next_absence_start_datetime, next_absence_end_datetime)
+
+def ProgAbsence(absence_range):
+    PrintAndLog("Program absence "+ absence_range.str())
     GetAtlanticToken()
     CozyTouchLogin()
-    CozyTouchCommand('refreshAbsenceMode', [])
+
+    #CozyTouchCommand('refreshAbsenceMode', [])
+    #CozyTouchCommand('refreshDateTime', [])
+
+    def FormatDateTime(absence_date):
+        return [{ 'month': absence_date.month, 'hour': absence_date.hour, 'year': absence_date.year, 'weekday': absence_date.weekday(), 'day': absence_date.day, 'minute': absence_date.minute, 'second': absence_date.second }]
+
+    CozyTouchCommand('setAbsenceStartDate', FormatDateTime(absence_range.start - timedelta(minutes = config.absence_start_margin))) 
+    CozyTouchCommand('setAbsenceEndDate', FormatDateTime(absence_range.end + timedelta(minutes = config.absence_end_margin))) 
+    
     CozyTouchCommand('refreshDateTime', [])
-
-
-    PrintDeviceStatus()
-    #CozyTouchCommand('setAbsenceMode', ["on"]) 
-    CozyTouchCommand('setAbsenceStartDate', [{ 'month': 9, 'hour': 18, 'year': 2022, 'weekday': 5, 'day': 17, 'minute': 00, 'second': 00 }]) 
-    CozyTouchCommand('setAbsenceEndDate', [{ 'month': 9, 'hour': 19, 'year': 2022, 'weekday': 5, 'day': 17, 'minute': 00, 'second': 00 }]) 
-    
-    CozyTouchCommand('setExpectedNumberOfShower', [2]) 
-    
-
     CozyTouchCommand('refreshAbsenceMode', [])
     PrintDeviceStatus()
+
+def WaitForDateTime(target_datetime):
+    current_datetime = datetime.now()
+    while current_datetime < target_datetime:
+        missing_time = target_datetime - current_datetime
+        PrintAndLog("Wait for "+str(missing_time) + " to " + str(target_datetime))
+        time.sleep(missing_time.total_seconds())
+        current_datetime = datetime.now()
+
+def Run():
+
+    Status() # To check if connection works
+
+
+    while True:
+        current_datetime = datetime.now()
+        next_absence_range = GetNextAbsenceRange(current_datetime)
+        PrintAndLog("Next absence is "+ next_absence_range.str())
+        prog_absence_datetime = next_absence_range.start - timedelta(minutes = config.absence_prog_margin)
+        WaitForDateTime(prog_absence_datetime)
+        ProgAbsence(next_absence_range)
+        
+        WaitForDateTime(next_absence_range.end)
+
 
 def Status():
     GetAtlanticToken()
@@ -259,6 +357,10 @@ def Status():
 ParseArguments()
 LoadConfig()
 
+PrintAndLog("==============")
+PrintAndLog("Run command: "+ config.command)
+PrintAndLog("--------------")
+
 if config.loaded:
     if config.command == "scan":
         Scan()
@@ -266,3 +368,7 @@ if config.loaded:
         Run()
     elif config.command == "status":
         Status()
+
+PrintAndLog("--------------")
+PrintAndLog("Command "+ config.command + " done")
+PrintAndLog("==============")
