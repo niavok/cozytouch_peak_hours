@@ -4,6 +4,7 @@ import json
 import argparse
 import configparser
 import time
+import sys
 from datetime import datetime, timedelta
 from datetime import time as dtime
 
@@ -41,6 +42,7 @@ def PrintAndLog(message : str, doPrint = True):
     line = str(datetime.now()) + " - " + message_str
     if(doPrint):
         print(line)
+        sys.stdout.flush()
     log_file = open(config.log_file_path, 'a')
     log_file.write(line)
     log_file.write("\n")
