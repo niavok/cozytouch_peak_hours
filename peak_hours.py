@@ -231,6 +231,18 @@ def Scan():
         PrintAndLog("    - deviceURL: "+ deviceURL)
 
 def PrintDeviceStatus():
+
+    CozyTouchCommand('refreshDateTime', [])
+    CozyTouchCommand('refreshAbsenceMode', [])
+    CozyTouchCommand('refreshHeatingStatus', [])
+    CozyTouchCommand('refreshMiddleWaterTemperatureIn', [])
+    CozyTouchCommand('refreshMiddleWaterTemperature', [])
+    CozyTouchCommand('refreshV40WaterVolumeEstimation', [])
+    CozyTouchCommand('refreshNumberOfShowerRemaining', [])
+    CozyTouchCommand('refreshRemainingHotWater', [])
+    
+    CozyTouchGet('refreshAllStates')
+
     devices = CozyTouchGet('../../enduserAPI/setup/devices')
     for device in devices:
         if device['deviceURL'] != config.device_url:
@@ -258,6 +270,13 @@ def PrintDeviceStatus():
                 PrintAndLog('  * Temperature 1: '+ str(state['value']))
             elif state['name'] == "core:MiddleWaterTemperatureInState":
                 PrintAndLog('  * Temperature 2: '+ str(state['value']))
+            elif state['name'] == "core:V40WaterVolumeEstimationState":
+                PrintAndLog('  * V40WaterVolumeEstimation: '+ str(state['value']))
+            elif state['name'] == "core:RemainingHotWaterState":
+                PrintAndLog('  * core:RemainingHotWaterState: '+ str(state['value']))
+            elif state['name'] == "core:NumberOfShowerRemainingState":
+                PrintAndLog('  * NumberOfShowerRemainingState: '+ str(state['value']))
+
             #elif "Absence" in state['name']:
             #    PrintAndLog('  - '+ state['name']+': '+ str(state['value']))
             #elif "Temperature" in state['name']:
@@ -347,13 +366,6 @@ def Run():
 def Status():
     GetAtlanticToken()
     CozyTouchLogin()
-    CozyTouchCommand('refreshDateTime', [])
-    CozyTouchCommand('refreshAbsenceMode', [])
-    CozyTouchCommand('refreshHeatingStatus', [])
-    CozyTouchCommand('refreshMiddleWaterTemperatureIn', []) 
-    CozyTouchCommand('refreshMiddleWaterTemperature', []) 
-    
-    CozyTouchGet('refreshAllStates')
     PrintDeviceStatus()
 
 ParseArguments()
