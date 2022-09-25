@@ -5,6 +5,7 @@ import argparse
 import configparser
 import time
 import sys
+import os
 from datetime import datetime, timedelta
 from datetime import time as dtime
 
@@ -43,7 +44,7 @@ def PrintAndLog(message : str, doPrint = True):
     if(doPrint):
         print(line)
         sys.stdout.flush()
-    log_file = open(config.log_file_path, 'a')
+    log_file = open(os.path.dirname(os.path.realpath(__file__)) + "/" + config.log_file_path, 'a')
     log_file.write(line)
     log_file.write("\n")
     log_file.close()
