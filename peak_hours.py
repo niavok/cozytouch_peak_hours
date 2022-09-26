@@ -102,7 +102,11 @@ def GetAtlanticToken():
         PrintAndLog("Fail to connect to server")
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
-        return
+        return False
+    except urllib.error.URLError as err:
+        PrintAndLog("Fail to resolve URL, check internet connection")
+        PrintAndLog('error' + str(err))
+        return False
 
     PrintAndLog("Get Atlantic token: OK")
 
@@ -111,21 +115,26 @@ def GetAtlanticToken():
     session.atlantic_access_token = response['access_token']
     session.atlantic_refresh_token = response['refresh_token']
     session.atlantic_token_expire_in = response['expires_in']
+    return True
 
 def CozyTouchLogin():
     # Get JWT Token
     urljwt = config.atlantic_url + "gacoma/gacomawcfservice/accounts/jwt"
     reqjwt = urllib.request.Request(urljwt, method='GET')
     reqjwt.add_header('Authorization', 'Bearer '+session.atlantic_access_token)
-    
+
     jst_raw_response = ""
     try:
         jst_raw_response = urllib.request.urlopen(reqjwt)
     except urllib.error.HTTPError as err:
         PrintAndLog("Fail to get jwt")
         PrintAndLog('error' + str(err))
-        priPrintAndLognt(err.read().decode())
-        return
+        PrintAndLog(err.read().decode())
+        return False
+    except urllib.error.URLError as err:
+        PrintAndLog("Fail to resolve URL, check internet connection")
+        PrintAndLog('error' + str(err))
+        return False
     jwt = jst_raw_response.read().decode(jst_raw_response.info().get_param('charset') or 'utf-8').replace('"', '')
     PrintAndLog("Get jst token: OK")
     Log(jwt)
@@ -144,13 +153,18 @@ def CozyTouchLogin():
         PrintAndLog("Fail to connect to cosytouch login server")
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
-        return
+        return False
+    except urllib.error.URLError as err:
+        PrintAndLog("Fail to resolve URL, check internet connection")
+        PrintAndLog('error' + str(err))
+        return False
 
     response = raw_response.read().decode(raw_response.info().get_param('charset') or 'utf-8')
     Log(response)
     session.cozytouch_cookies = raw_response.info().get_all('Set-Cookie')[0]
 
     PrintAndLog("Cosytouch login: OK")
+    return True
 
 def CozyTouchGet(url):
     url = config.cozytouch_url + url
@@ -165,11 +179,15 @@ def CozyTouchGet(url):
         PrintAndLog("Fail to connect to cosytouch data server")
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
-        return
-    
+        return False
+    except urllib.error.URLError as err:
+        PrintAndLog("Fail to resolve URL, check internet connection")
+        PrintAndLog('error' + str(err))
+        return False
+
     response_json = (raw_response.read().decode(raw_response.info().get_param('charset') or 'utf-8'))
     response = json.loads(response_json)
-    
+
     Log(response_json)
     time.sleep(1) # Wait between requests
     return response
@@ -183,7 +201,7 @@ def CozyTouchCommand(command, parameters):
     req.add_header('Content-type', 'application/json')
 
     body  = {
-        'actions': [ 
+        'actions': [
             {
                 'deviceURL': config.device_url,
                 'commands': [
@@ -205,7 +223,11 @@ def CozyTouchCommand(command, parameters):
         PrintAndLog("Fail to send command")
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
-        return
+        return False
+    except urllib.error.URLError as err:
+        PrintAndLog("Fail to resolve URL, check internet connection")
+        PrintAndLog('error' + str(err))
+        return False
     response = json.loads(raw_response.read().decode(raw_response.info().get_param('charset') or 'utf-8'))
     Log(response)
     time.sleep(1) # Wait between requests
@@ -213,10 +235,15 @@ def CozyTouchCommand(command, parameters):
 
 
 def Scan():
-    GetAtlanticToken()
-    CozyTouchLogin()
-    CozyTouchGet('refreshAllStates')
+    if not GetAtlanticToken():
+        return False
+    if not CozyTouchLogin():
+        return False
+    if not CozyTouchGet('refreshAllStates'):
+        return False
     setup = CozyTouchGet('getSetup')
+    if not setup:
+        return False
     gateway = setup['setup']['gateways'][0]
     if gateway['alive']:
         PrintAndLog("Gateway: OK")
@@ -230,21 +257,23 @@ def Scan():
         deviceURL = device['deviceURL']
         PrintAndLog("  - "+ label + ": "+ widget)
         PrintAndLog("    - deviceURL: "+ deviceURL)
+    return True
 
 def PrintDeviceStatus():
 
-    CozyTouchCommand('refreshDateTime', [])
-    CozyTouchCommand('refreshAbsenceMode', [])
-    CozyTouchCommand('refreshHeatingStatus', [])
-    CozyTouchCommand('refreshMiddleWaterTemperatureIn', [])
-    CozyTouchCommand('refreshMiddleWaterTemperature', [])
-    CozyTouchCommand('refreshV40WaterVolumeEstimation', [])
-    CozyTouchCommand('refreshNumberOfShowerRemaining', [])
-    CozyTouchCommand('refreshRemainingHotWater', [])
-    
-    CozyTouchGet('refreshAllStates')
+    if not CozyTouchCommand('refreshDateTime', []) : return False
+    if not CozyTouchCommand('refreshAbsenceMode', []) : return False
+    if not CozyTouchCommand('refreshHeatingStatus', []) : return False
+    if not CozyTouchCommand('refreshMiddleWaterTemperatureIn', []) : return False
+    if not CozyTouchCommand('refreshMiddleWaterTemperature', []) : return False
+    if not CozyTouchCommand('refreshV40WaterVolumeEstimation', []) : return False
+    if not CozyTouchCommand('refreshNumberOfShowerRemaining', []) : return False
+    if not CozyTouchCommand('refreshRemainingHotWater', []) : return False
+
+    if not CozyTouchGet('refreshAllStates') : return False
 
     devices = CozyTouchGet('../../enduserAPI/setup/devices')
+    if not devices : return False
     for device in devices:
         if device['deviceURL'] != config.device_url:
             continue
@@ -284,13 +313,14 @@ def PrintDeviceStatus():
             #    PrintAndLog('  - '+ state['name']+': '+ str(state['value']))
             #elif "Heating" in state['name']:
             #    PrintAndLog('  - '+ state['name']+': '+ str(state['value']))
+    return True
 
 
 class AbsenceRange:
     def __init__(self, start, end):
         self.start = start
         self.end = end
-    
+
     def str(self):
         return "(" + str(self.start) + ", " + str(self.end) + ")"
 
@@ -301,7 +331,7 @@ def GetNextAbsenceRange(current_datetime):
 
     for absence_range in config.absence_ranges:
         start_time = dtime.fromisoformat(absence_range[0])
-        
+
         absence_start_datetime = None
 
         if start_time >= current_time:
@@ -324,8 +354,10 @@ def GetNextAbsenceRange(current_datetime):
 
 def ProgAbsence(absence_range):
     PrintAndLog("Program absence "+ absence_range.str())
-    GetAtlanticToken()
-    CozyTouchLogin()
+    if not GetAtlanticToken():
+        return False
+    if not CozyTouchLogin():
+        return False
 
     #CozyTouchCommand('refreshAbsenceMode', [])
     #CozyTouchCommand('refreshDateTime', [])
@@ -333,12 +365,15 @@ def ProgAbsence(absence_range):
     def FormatDateTime(absence_date):
         return [{ 'month': absence_date.month, 'hour': absence_date.hour, 'year': absence_date.year, 'weekday': absence_date.weekday(), 'day': absence_date.day, 'minute': absence_date.minute, 'second': absence_date.second }]
 
-    CozyTouchCommand('setAbsenceStartDate', FormatDateTime(absence_range.start - timedelta(minutes = config.absence_start_margin))) 
-    CozyTouchCommand('setAbsenceEndDate', FormatDateTime(absence_range.end + timedelta(minutes = config.absence_end_margin))) 
-    
+    if not CozyTouchCommand('setAbsenceStartDate', FormatDateTime(absence_range.start - timedelta(minutes = config.absence_start_margin))):
+        return False
+    if not CozyTouchCommand('setAbsenceEndDate', FormatDateTime(absence_range.end + timedelta(minutes = config.absence_end_margin))):
+        return False
+
     CozyTouchCommand('refreshDateTime', [])
     CozyTouchCommand('refreshAbsenceMode', [])
     PrintDeviceStatus()
+    return True
 
 def WaitForDateTime(target_datetime):
     current_datetime = datetime.now()
@@ -350,8 +385,9 @@ def WaitForDateTime(target_datetime):
 
 def Run():
 
-    Status() # To check if connection works
-
+    while not Status(): # To check if connection works
+        PrintAndLog("Fail to get run initial status. Retry in 5 minutes")
+        time.sleep(5*60) # Wait between retry
 
     while True:
         current_datetime = datetime.now()
@@ -359,15 +395,25 @@ def Run():
         PrintAndLog("Next absence is "+ next_absence_range.str())
         prog_absence_datetime = next_absence_range.start - timedelta(minutes = config.absence_prog_margin)
         WaitForDateTime(prog_absence_datetime)
-        ProgAbsence(next_absence_range)
-        
+
+        while next_absence_range.end > datetime.now():
+            if not ProgAbsence(next_absence_range):
+                PrintAndLog("Fail to programe absence. Retry in 5 minutes")
+                time.sleep(5*60) # Wait between retry
+            else:
+                break
+
         WaitForDateTime(next_absence_range.end)
 
 
 def Status():
-    GetAtlanticToken()
-    CozyTouchLogin()
-    PrintDeviceStatus()
+    if not GetAtlanticToken():
+        return False
+    if not CozyTouchLogin():
+        return False
+    if not PrintDeviceStatus():
+        return False
+    return True
 
 ParseArguments()
 LoadConfig()
@@ -378,11 +424,13 @@ PrintAndLog("--------------")
 
 if config.loaded:
     if config.command == "scan":
-        Scan()
+        if not Scan():
+            PrintAndLog("Fail to scan")
     elif config.command == "run":
-        Run()
+            Run()
     elif config.command == "status":
-        Status()
+        if not Status():
+            PrintAndLog("Fail to get status")
 
 PrintAndLog("--------------")
 PrintAndLog("Command "+ config.command + " done")
