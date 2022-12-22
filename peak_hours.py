@@ -233,6 +233,25 @@ def CozyTouchCommand(command, parameters):
     time.sleep(1) # Wait between requests
     return response
 
+def FormatDateTime(date : datetime) -> list:
+    return [{ 'month': date.month, 'hour': date.hour, 'year': date.year, 'weekday': date.weekday(), 'day': date.day, 'minute': date.minute, 'second': date.second }]
+
+def ParseDateTime(jsonDateTime : list , now : datetime) -> datetime :
+
+    if jsonDateTime['year'] == '??':
+        jsonDateTime['year'] = now.year
+    if jsonDateTime['month'] == '??':
+        jsonDateTime['month'] = now.month
+    if jsonDateTime['day'] == '??':
+        jsonDateTime['day'] = now.day
+    if jsonDateTime['hour'] == '??':
+        jsonDateTime['hour'] = now.hour
+    if jsonDateTime['minute'] == '??':
+        jsonDateTime['minute'] = now.minute
+    if jsonDateTime['second'] == '??':
+        jsonDateTime['second'] = now.second
+       
+    return datetime(jsonDateTime['year'], jsonDateTime['month'], jsonDateTime['day'], jsonDateTime['hour'], jsonDateTime['minute'], jsonDateTime['second'])
 
 def Scan():
     if not GetAtlanticToken():
@@ -259,8 +278,29 @@ def Scan():
         PrintAndLog("    - deviceURL: "+ deviceURL)
     return True
 
-def PrintDeviceStatus():
+def GetDateError():
+    now_date = datetime.now()
+    if not CozyTouchCommand('refreshDateTime', []) : return False
+    if not CozyTouchGet('refreshAllStates') : return False
 
+    devices = CozyTouchGet('../../enduserAPI/setup/devices')
+    if not devices : return False
+    for device in devices:
+        if device['deviceURL'] != config.device_url:
+            continue
+        states = device['states']
+        for state in states:
+            if state['name'] == "core:DateTimeState":
+                PrintAndLog('Date: '+ str(state['value']))
+                distant_date = ParseDateTime(state['value'], now_date)
+                date_error = distant_date - now_date
+                PrintAndLog('Date error: '+ str(date_error)+')')              
+                return date_error
+    return False
+
+def PrintDeviceStatus(updateDateIfNeeded = True):
+    now_date = datetime.now()
+    date_error = None
     if not CozyTouchCommand('refreshDateTime', []) : return False
     if not CozyTouchCommand('refreshAbsenceMode', []) : return False
     if not CozyTouchCommand('refreshHeatingStatus', []) : return False
@@ -287,15 +327,24 @@ def PrintDeviceStatus():
             elif state['name'] == "core:ExpectedNumberOfShowerState":
                 PrintAndLog('  * ExpectedNumberOfShower: '+ str(state['value']))
             elif state['name'] == "core:DateTimeState":
-                PrintAndLog('  * Date: '+ str(state['value']))
+                PrintAndLog('  * Date:')
+                PrintAndLog('      + Raw: '+ str(state['value']))
+                distant_date = ParseDateTime(state['value'], now_date)
+                date_error = distant_date - now_date
+                PrintAndLog('      + Date: '+ str(distant_date)+')')              
+                PrintAndLog('      + Error from now: '+ str(date_error)+')')              
             elif state['name'] == "core:ControlWaterTargetTemperatureState":
                 PrintAndLog('  * Target temperature: '+ str(state['value']))
             elif state['name'] == "core:HeatingStatusState":
                 PrintAndLog('  * Heating: '+ str(state['value']))
             elif state['name'] == "core:AbsenceEndDateState":
-                PrintAndLog('  * AbsenceEndDate: '+ str(state['value']))
+                PrintAndLog('  * AbsenceEndDate:')
+                PrintAndLog('      + Raw: '+ str(state['value']))
+                PrintAndLog('      + Date: '+ str(ParseDateTime(state['value'], now_date)))
             elif state['name'] == "core:AbsenceStartDateState":
-                PrintAndLog('  * AbsenceStartDate: '+ str(state['value']))
+                PrintAndLog('  * AbsenceStartDate:')
+                PrintAndLog('      + Raw: '+ str(state['value']))
+                PrintAndLog('      + Date: '+ str(ParseDateTime(state['value'], now_date)))
             elif state['name'] == "modbuslink:MiddleWaterTemperatureState":
                 PrintAndLog('  * Temperature 1: '+ str(state['value']))
             elif state['name'] == "core:MiddleWaterTemperatureInState":
@@ -313,8 +362,15 @@ def PrintDeviceStatus():
             #    PrintAndLog('  - '+ state['name']+': '+ str(state['value']))
             #elif "Heating" in state['name']:
             #    PrintAndLog('  - '+ state['name']+': '+ str(state['value']))
-    return True
 
+    #if updateDateIfNeeded:
+    #    if abs(date_error) > timedelta(minutes=10):
+    #        PrintAndLog('Date error too high, try to update date')
+    #        if not CozyTouchCommand('setDateTime', FormatDateTime(datetime.now())):
+    #            return False
+    #        PrintDeviceStatus(False)
+    
+    return True
 
 class AbsenceRange:
     def __init__(self, start, end):
@@ -352,6 +408,41 @@ def GetNextAbsenceRange(current_datetime):
 
     return AbsenceRange(next_absence_start_datetime, next_absence_end_datetime)
 
+def GetCurrentAbsenceRange(current_datetime):
+    current_time = current_datetime.time()
+
+    for absence_range in config.absence_ranges:
+        start_time = dtime.fromisoformat(absence_range[0])
+
+        absence_start_datetime = None
+        absence_end_datetime = None
+
+        if start_time >= current_time:
+            # absence start the previous day, for example it's 17h and start is 22h, the potential current start at 22h yesterday
+            absence_start_datetime = datetime.combine(current_datetime.date() - timedelta(days=1), start_time)
+        else:
+            # else the potential current start is today, for example it's 17h and the start is 14h
+            absence_start_datetime = datetime.combine(current_datetime.date(), start_time)
+
+        end_time = dtime.fromisoformat(absence_range[1])
+        if end_time >= start_time:
+            # end the same day it start
+            absence_end_datetime = datetime.combine(absence_start_datetime.date(), end_time)
+        else:
+            # end the next day it start
+            absence_end_datetime = datetime.combine(absence_start_datetime.date() + timedelta(days=1), end_time)
+
+
+
+        if current_datetime > absence_start_datetime and current_datetime < absence_end_datetime:
+            PrintAndLog("Currently in range" + str(absence_range))
+            #DEBUG return AbsenceRange(absence_start_datetime, current_datetime + timedelta(minutes=1 - config.absence_end_margin))
+            return AbsenceRange(absence_start_datetime, absence_end_datetime)
+        else:
+            PrintAndLog("Currenlty not in range" + str(absence_range))
+    return None
+
+
 def ProgAbsence(absence_range):
     PrintAndLog("Program absence "+ absence_range.str())
     if not GetAtlanticToken():
@@ -362,16 +453,13 @@ def ProgAbsence(absence_range):
     #CozyTouchCommand('refreshAbsenceMode', [])
     #CozyTouchCommand('refreshDateTime', [])
 
-    def FormatDateTime(absence_date):
-        return [{ 'month': absence_date.month, 'hour': absence_date.hour, 'year': absence_date.year, 'weekday': absence_date.weekday(), 'day': absence_date.day, 'minute': absence_date.minute, 'second': absence_date.second }]
+    dateError = GetDateError()
 
-    if not CozyTouchCommand('setAbsenceStartDate', FormatDateTime(absence_range.start - timedelta(minutes = config.absence_start_margin))):
+    if not CozyTouchCommand('setAbsenceStartDate', FormatDateTime(absence_range.start - timedelta(minutes = config.absence_start_margin) + dateError)):
         return False
-    if not CozyTouchCommand('setAbsenceEndDate', FormatDateTime(absence_range.end + timedelta(minutes = config.absence_end_margin))):
+    if not CozyTouchCommand('setAbsenceEndDate', FormatDateTime(absence_range.end + timedelta(minutes = config.absence_end_margin) + dateError)):
         return False
 
-    CozyTouchCommand('refreshDateTime', [])
-    CozyTouchCommand('refreshAbsenceMode', [])
     PrintDeviceStatus()
     return True
 
@@ -388,6 +476,11 @@ def Run():
     while not Status(): # To check if connection works
         PrintAndLog("Fail to get run initial status. Retry in 5 minutes")
         time.sleep(5*60) # Wait between retry
+
+    # Setup current absence range if needed
+    current_absence_range = GetCurrentAbsenceRange(datetime.now())
+    if current_absence_range:
+        ProgAbsence(current_absence_range)
 
     while True:
         current_datetime = datetime.now()
