@@ -52,7 +52,7 @@ def PrintAndLog(message : str, doPrint = True):
 
 def ParseArguments():
     parser = argparse.ArgumentParser(description='Water heater control to avoid peak hours.')
-    parser.add_argument('command', choices={'scan', 'status', 'run'}, default='run',
+    parser.add_argument('command', choices={'scan', 'status', 'run', 'on', 'off'}, default='run',
                     help='scan to display the current state, run to execute the heater control.')
     parser.add_argument('--config', '-c', default='config.cfg')
 
@@ -377,8 +377,12 @@ class AbsenceRange:
         self.start = start
         self.end = end
 
-    def str(self):
+    def __str__(self):
         return "(" + str(self.start) + ", " + str(self.end) + ")"
+
+def TimeWithOffset(time, offset):
+    date = datetime.combine(datetime.now().date(), time) + offset
+    return date.time()
 
 def GetNextAbsenceRange(current_datetime):
     current_time = current_datetime.time()
@@ -386,7 +390,7 @@ def GetNextAbsenceRange(current_datetime):
     next_absence_end_datetime = None
 
     for absence_range in config.absence_ranges:
-        start_time = dtime.fromisoformat(absence_range[0])
+        start_time = TimeWithOffset(dtime.fromisoformat(absence_range[0]) , timedelta(minutes = -config.absence_start_margin))
 
         absence_start_datetime = None
 
@@ -399,7 +403,7 @@ def GetNextAbsenceRange(current_datetime):
         if not next_absence_start_datetime or absence_start_datetime < next_absence_start_datetime:
             next_absence_start_datetime = absence_start_datetime
 
-            end_time = dtime.fromisoformat(absence_range[1])
+            end_time = TimeWithOffset(dtime.fromisoformat(absence_range[1]), timedelta(minutes = config.absence_end_margin))
             if end_time >= start_time:
                 # absence end same day
                 next_absence_end_datetime = datetime.combine(next_absence_start_datetime.date(), end_time)
@@ -412,7 +416,7 @@ def GetCurrentAbsenceRange(current_datetime):
     current_time = current_datetime.time()
 
     for absence_range in config.absence_ranges:
-        start_time = dtime.fromisoformat(absence_range[0])
+        start_time = TimeWithOffset(dtime.fromisoformat(absence_range[0]), timedelta(minutes = -config.absence_start_margin))
 
         absence_start_datetime = None
         absence_end_datetime = None
@@ -424,7 +428,7 @@ def GetCurrentAbsenceRange(current_datetime):
             # else the potential current start is today, for example it's 17h and the start is 14h
             absence_start_datetime = datetime.combine(current_datetime.date(), start_time)
 
-        end_time = dtime.fromisoformat(absence_range[1])
+        end_time = TimeWithOffset(dtime.fromisoformat(absence_range[1]), timedelta(minutes = config.absence_end_margin))
         if end_time >= start_time:
             # end the same day it start
             absence_end_datetime = datetime.combine(absence_start_datetime.date(), end_time)
@@ -435,7 +439,7 @@ def GetCurrentAbsenceRange(current_datetime):
 
 
         if current_datetime > absence_start_datetime and current_datetime < absence_end_datetime:
-            PrintAndLog("Currently in range" + str(absence_range))
+            PrintAndLog("Currently in range " + str(absence_range))
             #DEBUG return AbsenceRange(absence_start_datetime, current_datetime + timedelta(minutes=1 - config.absence_end_margin))
             return AbsenceRange(absence_start_datetime, absence_end_datetime)
         else:
@@ -463,6 +467,43 @@ def ProgAbsence(absence_range):
     PrintDeviceStatus()
     return True
 
+
+def ProgOn():
+    PrintAndLog("Program boiler on")
+    if not GetAtlanticToken():
+        return False
+    if not CozyTouchLogin():
+        return False
+
+    current_datetime = datetime.now()
+    dateError = GetDateError()
+
+    if not CozyTouchCommand('setAbsenceStartDate', FormatDateTime(current_datetime + dateError - timedelta(days = 5*365))):
+        return False
+    if not CozyTouchCommand('setAbsenceEndDate', FormatDateTime(current_datetime + dateError - timedelta(days = 5 * 365))):
+        return False
+
+    PrintDeviceStatus()
+    return True
+
+def ProgOff():
+    PrintAndLog("Program boiler off")
+    if not GetAtlanticToken():
+        return False
+    if not CozyTouchLogin():
+        return False
+
+    current_datetime = datetime.now()
+    dateError = GetDateError()
+
+    if not CozyTouchCommand('setAbsenceStartDate', FormatDateTime(current_datetime + dateError - timedelta(days = 5 * 365))):
+        return False
+    if not CozyTouchCommand('setAbsenceEndDate', FormatDateTime(current_datetime + dateError + timedelta(days = 5 * 365))):
+        return False
+
+    PrintDeviceStatus()
+    return True
+
 def WaitForDateTime(target_datetime):
     current_datetime = datetime.now()
     while current_datetime < target_datetime:
@@ -477,29 +518,33 @@ def Run():
         PrintAndLog("Fail to get run initial status. Retry in 5 minutes")
         time.sleep(5*60) # Wait between retry
 
-    # Setup current absence range if needed
-    current_absence_range = GetCurrentAbsenceRange(datetime.now())
-    if current_absence_range:
-        ProgAbsence(current_absence_range)
-    else:
-        ProgAbsence(AbsenceRange(datetime.now() - timedelta(days = 10), datetime.now()- timedelta(days = 10)))
-
     while True:
         current_datetime = datetime.now()
+
+        # Check if in Absence range and set the on/off state
+        current_absence_range = GetCurrentAbsenceRange(current_datetime)
         next_absence_range = GetNextAbsenceRange(current_datetime)
-        PrintAndLog("Next absence is "+ next_absence_range.str())
-        prog_absence_datetime = next_absence_range.start - timedelta(minutes = config.absence_prog_margin)
-        WaitForDateTime(prog_absence_datetime)
+        PrintAndLog("Current range is " + str(current_absence_range))
+        PrintAndLog("Next range is " + str(next_absence_range))
+        if current_absence_range:
+            # Try to put off
+            while current_absence_range.end > datetime.now():
+                if not ProgOff():
+                    PrintAndLog("Fail to program off. Retry in 5 minutes")
+                    time.sleep(5*60) # Wait between retry
+                else:
+                    break
+            WaitForDateTime(current_absence_range.end)
 
-        while next_absence_range.end > datetime.now():
-            if not ProgAbsence(next_absence_range):
-                PrintAndLog("Fail to programe absence. Retry in 5 minutes")
-                time.sleep(5*60) # Wait between retry
-            else:
-                break
-
-        WaitForDateTime(next_absence_range.end)
-
+        else:
+            # Try to put on
+            while next_absence_range.start > datetime.now():
+                if not ProgOn():
+                    PrintAndLog("Fail to program on. Retry in 5 minutes")
+                    time.sleep(5*60) # Wait between retry
+                else:
+                    break
+            WaitForDateTime(next_absence_range.start)
 
 def Status():
     if not GetAtlanticToken():
@@ -522,7 +567,11 @@ if config.loaded:
         if not Scan():
             PrintAndLog("Fail to scan")
     elif config.command == "run":
-            Run()
+        Run()
+    elif config.command == "on":
+        ProgOn()
+    elif config.command == "off":
+        ProgOff()
     elif config.command == "status":
         if not Status():
             PrintAndLog("Fail to get status")
