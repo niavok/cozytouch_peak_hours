@@ -481,6 +481,8 @@ def Run():
     current_absence_range = GetCurrentAbsenceRange(datetime.now())
     if current_absence_range:
         ProgAbsence(current_absence_range)
+    else:
+        ProgAbsence(AbsenceRange(datetime.now() - timedelta(days = 10), datetime.now()- timedelta(days = 10)))
 
     while True:
         current_datetime = datetime.now()
