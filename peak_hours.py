@@ -251,7 +251,10 @@ def ParseDateTime(jsonDateTime : list , now : datetime) -> datetime :
     if jsonDateTime['second'] == '??':
         jsonDateTime['second'] = now.second
        
-    return datetime(jsonDateTime['year'], jsonDateTime['month'], jsonDateTime['day'], jsonDateTime['hour'], jsonDateTime['minute'], jsonDateTime['second'])
+    try:
+        return datetime(jsonDateTime['year'], jsonDateTime['month'], jsonDateTime['day'], jsonDateTime['hour'], jsonDateTime['minute'], jsonDateTime['second'])
+    except ValueError:
+        return False
 
 def Scan():
     if not GetAtlanticToken():
@@ -293,6 +296,8 @@ def GetDateError():
             if state['name'] == "core:DateTimeState":
                 PrintAndLog('Date: '+ str(state['value']))
                 distant_date = ParseDateTime(state['value'], now_date)
+                if not distant_date:
+                    return False
                 date_error = distant_date - now_date
                 PrintAndLog('Date error: '+ str(date_error)+')')              
                 return date_error
@@ -330,9 +335,12 @@ def PrintDeviceStatus(updateDateIfNeeded = True):
                 PrintAndLog('  * Date:')
                 PrintAndLog('      + Raw: '+ str(state['value']))
                 distant_date = ParseDateTime(state['value'], now_date)
-                date_error = distant_date - now_date
-                PrintAndLog('      + Date: '+ str(distant_date)+')')              
-                PrintAndLog('      + Error from now: '+ str(date_error)+')')              
+                if(distant_date):
+                    date_error = distant_date - now_date
+                    PrintAndLog('      + Date: '+ str(distant_date)+')')
+                    PrintAndLog('      + Error from now: '+ str(date_error)+')')
+                else:
+                    PrintAndLog('      + Invalid date')
             elif state['name'] == "core:ControlWaterTargetTemperatureState":
                 PrintAndLog('  * Target temperature: '+ str(state['value']))
             elif state['name'] == "core:HeatingStatusState":
