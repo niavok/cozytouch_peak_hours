@@ -250,11 +250,12 @@ def ParseDateTime(jsonDateTime : list , now : datetime) -> datetime :
         jsonDateTime['minute'] = now.minute
     if jsonDateTime['second'] == '??':
         jsonDateTime['second'] = now.second
-       
+
     try:
         return datetime(jsonDateTime['year'], jsonDateTime['month'], jsonDateTime['day'], jsonDateTime['hour'], jsonDateTime['minute'], jsonDateTime['second'])
     except ValueError:
-        return False
+        PrintAndLog('Fail to parse date, use now')
+        return now
 
 def Scan():
     if not GetAtlanticToken():
