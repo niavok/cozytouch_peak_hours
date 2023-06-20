@@ -21,7 +21,7 @@ class Config:
     absence_start_margin = 0
     absence_end_margin = 0
     absence_prog_margin = 0
-    atlantic_url=u'https://api.groupe-atlantic.com/'
+    atlantic_url=u'https://apis.groupe-atlantic.com/'
     cozytouch_url=u'https://ha110-1.overkiz.com/enduser-mobile-web/externalAPI/json/'
     cozytouch_login_url=u'https://ha110-1.overkiz.com/enduser-mobile-web/enduserAPI/'
 
@@ -88,10 +88,10 @@ def LoadConfig():
 def GetAtlanticToken():
     url = config.atlantic_url + "token"
     req = urllib.request.Request(url, method='POST')
-    req.add_header('Authorization', 'Basic czduc0RZZXdWbjVGbVV4UmlYN1pVSUM3ZFI4YTphSDEzOXZmbzA1ZGdqeDJkSFVSQkFTbmhCRW9h')
+    req.add_header('Authorization', 'Basic Q3RfMUpWeVRtSUxYOEllZkE3YVVOQmpGblpVYToyRWNORHpfZHkzNDJVSnFvMlo3cFNKTnZVdjBh')
     body  = {
         'grant_type':'password',
-        'username':config.login,
+        'username': 'GA-PRIVATEPERSON/' + config.login,
         'password':config.password
     }
     data = urllib.parse.urlencode(body).encode("utf-8")
@@ -119,7 +119,7 @@ def GetAtlanticToken():
 
 def CozyTouchLogin():
     # Get JWT Token
-    urljwt = config.atlantic_url + "gacoma/gacomawcfservice/accounts/jwt"
+    urljwt = config.atlantic_url + "magellan/accounts/jwt"
     reqjwt = urllib.request.Request(urljwt, method='GET')
     reqjwt.add_header('Authorization', 'Bearer '+session.atlantic_access_token)
 
@@ -141,6 +141,7 @@ def CozyTouchLogin():
 
     # Cozytouch login
     url = config.cozytouch_login_url + "login"
+    Log("POST: "+url)
     req = urllib.request.Request(url, method='POST')
     body  = {
         'jwt':jwt
@@ -167,16 +168,19 @@ def CozyTouchLogin():
     return True
 
 def CozyTouchGet(url):
-    url = config.cozytouch_url + url
+    url = config.cozytouch_login_url + url
+    Log("GET: "+ url)
     req = urllib.request.Request(url, method='GET')
     req.add_header('cache-control', 'no-cache')
+    req.add_header('Host', 'ha110-1.overkiz.com')
+    req.add_header('Connection', 'Keep-Alive')
     req.add_header('Cookie', session.cozytouch_cookies)
 
     raw_response  = ""
     try:
         raw_response = urllib.request.urlopen(req)
     except urllib.error.HTTPError as err:
-        PrintAndLog("Fail to connect to cosytouch data server")
+        PrintAndLog("Fail to connect to cosytouch data server: " + url)
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
         return False
@@ -189,12 +193,13 @@ def CozyTouchGet(url):
     response = json.loads(response_json)
 
     Log(response_json)
-    time.sleep(1) # Wait between requests
+    time.sleep(2) # Wait between requests
     return response
 
 def CozyTouchCommand(command, parameters):
     PrintAndLog("Send command '"+ command + ' ' + str(parameters))
     url = config.cozytouch_url + '../../enduserAPI/exec/apply'
+    Log("POST: "+ url)
     req = urllib.request.Request(url, method='POST')
     req.add_header('cache-control', 'no-cache')
     req.add_header('Cookie', session.cozytouch_cookies)
@@ -262,19 +267,19 @@ def Scan():
         return False
     if not CozyTouchLogin():
         return False
-    if not CozyTouchGet('refreshAllStates'):
-        return False
-    setup = CozyTouchGet('getSetup')
+    
+    setup = CozyTouchGet('setup')
+
     if not setup:
         return False
-    gateway = setup['setup']['gateways'][0]
+    gateway = setup['gateways'][0]
     if gateway['alive']:
         PrintAndLog("Gateway: OK")
     else:
         PrintAndLog("Gateway not alive")
 
     PrintAndLog("Devices:")
-    for device in setup['setup']['devices']:
+    for device in setup['devices']:
         label = device['label']
         widget = device['widget']
         deviceURL = device['deviceURL']
@@ -285,11 +290,11 @@ def Scan():
 def GetDateError():
     now_date = datetime.now()
     if not CozyTouchCommand('refreshDateTime', []) : return False
-    if not CozyTouchGet('refreshAllStates') : return False
+    
+    setup = CozyTouchGet('setup')
 
-    devices = CozyTouchGet('../../enduserAPI/setup/devices')
-    if not devices : return False
-    for device in devices:
+    if not setup : return False
+    for device in setup['devices']:
         if device['deviceURL'] != config.device_url:
             continue
         states = device['states']
@@ -300,7 +305,7 @@ def GetDateError():
                 if not distant_date:
                     return False
                 date_error = distant_date - now_date
-                PrintAndLog('Date error: '+ str(date_error)+')')              
+                PrintAndLog('Date error: '+ str(date_error)+')')
                 return date_error
     return False
 
@@ -316,11 +321,10 @@ def PrintDeviceStatus(updateDateIfNeeded = True):
     if not CozyTouchCommand('refreshNumberOfShowerRemaining', []) : return False
     if not CozyTouchCommand('refreshRemainingHotWater', []) : return False
 
-    if not CozyTouchGet('refreshAllStates') : return False
+    setup = CozyTouchGet('setup')
 
-    devices = CozyTouchGet('../../enduserAPI/setup/devices')
-    if not devices : return False
-    for device in devices:
+    if not setup : return False
+    for device in setup['devices']:
         if device['deviceURL'] != config.device_url:
             continue
         PrintAndLog(device['label'])
