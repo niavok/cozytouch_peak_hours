@@ -8,6 +8,7 @@ import sys
 import os
 from datetime import datetime, timedelta
 from datetime import time as dtime
+from telegram_notify import TelegramNotifier
 
 class Config:
     loaded : bool = False
@@ -49,6 +50,10 @@ def PrintAndLog(message : str, doPrint = True):
     log_file.write("\n")
     log_file.close()
 
+def Notify(message: str):
+    PrintAndLog(message)
+    notifier = TelegramNotifier(bot_token=config.telegram_bot_token, chat_id=config.telegram_bot_chat_id)
+    notifier.send("🔥 Chauffe-eau: " + message)
 
 def ParseArguments():
     parser = argparse.ArgumentParser(description='Water heater control to avoid peak hours.')
@@ -66,11 +71,11 @@ def LoadConfig():
     config_file.read(config.file_path)
 
     if len(config_file.sections()) == 0:
-        PrintAndLog("Fail to open or read config file '"+config.file_path+"'")
+        Notify("Fail to open or read config file '"+config.file_path+"'")
         return False
 
     if 'Access' not in config_file:
-        PrintAndLog("Fail to find 'Access section in config file")
+        Notify("Fail to find 'Access section in config file")
         return False
 
     config.login = config_file['Access']['Login']
@@ -81,6 +86,9 @@ def LoadConfig():
     config.absence_start_margin = int(config_file['Device']['AbsenceStartMargin'])
     config.absence_end_margin = int(config_file['Device']['AbsenceEndMargin'])
     config.absence_prog_margin = int(config_file['Device']['AbsenceProgMargin'])
+
+    config.telegram_bot_token = config_file['Telegram']['BotToken']
+    config.telegram_bot_chat_id = config_file['Telegram']['ChatId']
 
     config.loaded = True
     return True
@@ -99,12 +107,12 @@ def GetAtlanticToken():
     try:
         raw_response = urllib.request.urlopen(req, data)
     except urllib.error.HTTPError as err:
-        PrintAndLog("Fail to connect to server")
+        Notify("Fail to connect to server")
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
         return False
     except urllib.error.URLError as err:
-        PrintAndLog("Fail to resolve URL, check internet connection")
+        Notify("Fail to resolve URL, check internet connection")
         PrintAndLog('error' + str(err))
         return False
 
@@ -127,12 +135,12 @@ def CozyTouchLogin():
     try:
         jst_raw_response = urllib.request.urlopen(reqjwt)
     except urllib.error.HTTPError as err:
-        PrintAndLog("Fail to get jwt")
+        Notify("Fail to get jwt")
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
         return False
     except urllib.error.URLError as err:
-        PrintAndLog("Fail to resolve URL, check internet connection")
+        Notify("Fail to resolve URL, check internet connection")
         PrintAndLog('error' + str(err))
         return False
     jwt = jst_raw_response.read().decode(jst_raw_response.info().get_param('charset') or 'utf-8').replace('"', '')
@@ -151,12 +159,12 @@ def CozyTouchLogin():
     try:
         raw_response = urllib.request.urlopen(req, data)
     except urllib.error.HTTPError as err:
-        PrintAndLog("Fail to connect to cosytouch login server")
+        Notify("Fail to connect to cosytouch login server")
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
         return False
     except urllib.error.URLError as err:
-        PrintAndLog("Fail to resolve URL, check internet connection")
+        Notify("Fail to resolve URL, check internet connection")
         PrintAndLog('error' + str(err))
         return False
 
@@ -180,12 +188,12 @@ def CozyTouchGet(url):
     try:
         raw_response = urllib.request.urlopen(req)
     except urllib.error.HTTPError as err:
-        PrintAndLog("Fail to connect to cosytouch data server: " + url)
+        Notify("Fail to connect to cosytouch data server: " + url)
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
         return False
     except urllib.error.URLError as err:
-        PrintAndLog("Fail to resolve URL, check internet connection")
+        Notify("Fail to resolve URL, check internet connection")
         PrintAndLog('error' + str(err))
         return False
 
@@ -225,12 +233,12 @@ def CozyTouchCommand(command, parameters):
     try:
         raw_response = urllib.request.urlopen(req, jsondataasbytes)
     except urllib.error.HTTPError as err:
-        PrintAndLog("Fail to send command")
+        Notify("Fail to send command")
         PrintAndLog('error' + str(err))
         PrintAndLog(err.read().decode())
         return False
     except urllib.error.URLError as err:
-        PrintAndLog("Fail to resolve URL, check internet connection")
+        Notify("Fail to resolve URL, check internet connection")
         PrintAndLog('error' + str(err))
         return False
     response = json.loads(raw_response.read().decode(raw_response.info().get_param('charset') or 'utf-8'))
@@ -528,8 +536,10 @@ def WaitForDateTime(target_datetime):
 def Run():
 
     while not Status(): # To check if connection works
-        PrintAndLog("Fail to get run initial status. Retry in 5 minutes")
+        Notify("Fail to get run initial status. Retry in 5 minutes")
         time.sleep(5*60) # Wait between retry
+
+    Notify("Start run")
 
     while True:
         current_datetime = datetime.now()
@@ -543,7 +553,7 @@ def Run():
             # Try to put off
             while current_absence_range.end > datetime.now():
                 if not ProgOff():
-                    PrintAndLog("Fail to program off. Retry in 5 minutes")
+                    Notify("Fail to program off. Retry in 5 minutes")
                     time.sleep(5*60) # Wait between retry
                 else:
                     break
@@ -553,7 +563,7 @@ def Run():
             # Try to put on
             while next_absence_range.start > datetime.now():
                 if not ProgOn():
-                    PrintAndLog("Fail to program on. Retry in 5 minutes")
+                    Notify("Fail to program on. Retry in 5 minutes")
                     time.sleep(5*60) # Wait between retry
                 else:
                     break
