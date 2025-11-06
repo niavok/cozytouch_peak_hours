@@ -9,6 +9,7 @@ import os
 from datetime import datetime, timedelta
 from datetime import time as dtime
 from telegram_notify import TelegramNotifier
+import requests
 
 class Config:
     loaded : bool = False
@@ -55,6 +56,24 @@ def Notify(message: str):
     notifier = TelegramNotifier(bot_token=config.telegram_bot_token, chat_id=config.telegram_bot_chat_id)
     notifier.send("🔥 Chauffe-eau: " + message)
 
+def KeepAliveOn(note: str = ""):
+    """Ping Healthchecks success with short timeout & retries."""
+    try:
+        r = requests.post(config.keep_alive_on_url, data=note.encode("utf-8"), timeout=5)
+        r.raise_for_status()
+        PrintAndLog("Ping Healthchecks on")
+    except requests.RequestException as e:
+        PrintAndLog("KeepAliveOn ping failed: %s", str(e))
+
+def KeepAliveOff(note: str = ""):
+    """Ping Healthchecks success with short timeout & retries."""
+    try:
+        r = requests.post(config.keep_alive_off_url, data=note.encode("utf-8"), timeout=5)
+        r.raise_for_status()
+        PrintAndLog("Ping Healthchecks off")
+    except requests.RequestException as e:
+        PrintAndLog("KeepAliveOff ping failed: %s", str(e))
+
 def ParseArguments():
     parser = argparse.ArgumentParser(description='Water heater control to avoid peak hours.')
     parser.add_argument('command', choices={'scan', 'status', 'run', 'on', 'off'}, default='run',
@@ -89,6 +108,10 @@ def LoadConfig():
 
     config.telegram_bot_token = config_file['Telegram']['BotToken']
     config.telegram_bot_chat_id = config_file['Telegram']['ChatId']
+
+    config.keep_alive_on_url = config_file['KeepAlive']['OnUrl']
+    config.keep_alive_off_url = config_file['KeepAlive']['OffUrl']
+
 
     config.loaded = True
     return True
@@ -505,6 +528,7 @@ def ProgOn():
         return False
 
     PrintDeviceStatus()
+    KeepAliveOn("Boiler on")
     return True
 
 def ProgOff():
@@ -523,6 +547,7 @@ def ProgOff():
         return False
 
     PrintDeviceStatus()
+    KeepAliveOff("Boiler off")
     return True
 
 def WaitForDateTime(target_datetime):
