@@ -23,7 +23,7 @@ class TelegramNotifier:
 
         # Tunables
         self.min_interval = 10        # seconds between messages to same chat
-        self.daily_cap = 10           # max messages per 24h
+        self.daily_cap = 100           # max messages per 24h
         self.dedupe_window = 3600     # seconds; don't resend identical *base* message within this window
         self.append_timestamp = True  # automatically add a timestamp to the sent message
 
